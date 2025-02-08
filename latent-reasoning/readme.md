@@ -65,7 +65,7 @@ The model employs a progressive training approach:
 Early experiments reveal:
 - Non-zero MSE/Cosine losses show distinct but stable latent representations
 - Lower cross-entropy loss suggests more expressive reasoning
-- MSE/Cosine loss helps with allignment of latent thoughts
+- MSE/Cosine loss helps with alignment of latent thoughts
 
 ### Limitations
 
