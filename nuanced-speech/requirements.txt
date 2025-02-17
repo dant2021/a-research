@@ -1,0 +1,5 @@
+torch>=2.0.0
+torchaudio>=2.0.0
+numpy>=1.21.0
+openai-whisper>=20231117
+kokoro>=0.1.0 
