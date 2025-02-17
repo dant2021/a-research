@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="emotional-speech-pipeline",
+    name="nuanced-speech",
     version="0.1.0",
     packages=find_packages(),
     install_requires=[
@@ -15,7 +15,7 @@ setup(
     description="A neural pipeline for preserving emotional characteristics in speech-to-speech conversion",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/dant2021/a-research/emotional-speech-pipeline",
+    url="https://github.com/dant2021/a-research/nuanced-speech",
     classifiers=[
         "Development Status :: Alpha",
         "Intended Audience :: Science/Research",
