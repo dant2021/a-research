@@ -92,36 +92,33 @@ class Trainer:
             print(f"Max: {tensor.max().item():.4f}")
     
     def train_step(self, batch):
-        # Move batch to appropriate devices
-        audio = batch['audio'].to(self.whisper_device)
-        text = batch['text'].to(self.training_device)
+        # Get audio sequence and target
+        audio_seq = batch['audio'].to(self.whisper_device)
         target_audio = batch['target_audio'].to(self.training_device)
         
-        # Freeze whisper and get features
+        # Get text from Whisper
         with torch.no_grad():
-            whisper_features = self.whisper_model.encode(audio)
+            # Get text from whisper pipeline
+            audio_np = audio_seq.squeeze().cpu().numpy()
+            result = self.whisper_pipe(audio_np, return_timestamps=True)
+            text = result["text"].to(self.training_device)
+            
+            # Get whisper features
+            whisper_features = self.whisper_model.encode(audio_seq)
             whisper_features = whisper_features.to(self.training_device)
         
-        # Get bypass features
-        style_features = self.bypass_network(whisper_features)
+
+        # Now predict style features aligned with phoneme length
+        style_features = self.bypass_network(whisper_features)  # [batch, seq_len, 256]
         
-        # Use synthesis model with gradient computation but frozen weights
-        requires_grad_orig = {}
-        for name, param in self.speech_synthesis.named_parameters():
-            requires_grad_orig[name] = param.requires_grad
-            param.requires_grad = False
-        
-        self.speech_synthesis.requires_grad_(False)
-        
+        # Generate final audio with style features
         with torch.set_grad_enabled(True):
-            # Forward pass through synthesis model
             with autocast():
-                output = self.speech_synthesis(text, style_features)
-                loss = self.stft_loss(output, target_audio)
-        
-        # Restore original requires_grad states
-        for name, param in self.speech_synthesis.named_parameters():
-            param.requires_grad = requires_grad_orig[name]
+                generated_audio, _ = self.speech_synthesis(
+                    text=text,
+                    bypass_features=style_features  # Will be used as voice parameter
+                )
+                loss = self.stft_loss(generated_audio, target_audio)
         
         return loss
     
