@@ -3,8 +3,9 @@ import torchaudio
 from torch.utils.data import Dataset
 
 class AudioDataset(Dataset):
-    def __init__(self, audio_files):
+    def __init__(self, audio_files, max_duration=None):
         self.audio_files = audio_files
+        self.max_samples = int(max_duration * 24000) if max_duration else None
         
     def __len__(self):
         return len(self.audio_files)
@@ -20,9 +21,13 @@ class AudioDataset(Dataset):
             waveform = waveform.mean(dim=0, keepdim=True)
         
         # Resample if necessary
-        if sample_rate != 16000:
-            resampler = torchaudio.transforms.Resample(sample_rate, 16000)
+        if sample_rate != 24000:
+            resampler = torchaudio.transforms.Resample(sample_rate, 24000)
             waveform = resampler(waveform)
+            
+        # Trim audio if max_duration is set
+        if self.max_samples and waveform.shape[-1] > self.max_samples:
+            waveform = waveform[..., :self.max_samples]
         
         return {
             'audio': waveform,

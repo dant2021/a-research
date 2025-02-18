@@ -38,7 +38,9 @@ data/
 *.mp3
 *.wav
 readme_private.md
-*_private.*
+*private*
+run-kokoro-test.py
+*test*
 
 # Logs
 *.log

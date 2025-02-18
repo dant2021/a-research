@@ -16,7 +16,7 @@ def run_diagnostic():
     print(f"\nFound {len(audio_files)} audio files")
     
     # Create dataset and dataloader
-    dataset = AudioDataset(audio_files)
+    dataset = AudioDataset(audio_files, max_duration=30)
     dataloader = DataLoader(dataset, batch_size=1, shuffle=True)
     
     # Initialize trainer
