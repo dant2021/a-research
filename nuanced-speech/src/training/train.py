@@ -9,7 +9,7 @@ from src.utils.audio import compute_spectrogram
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 import numpy as np
 from src.training.dataset import AudioDataset
-
+from configs.default_config import config
 
 
 class Trainer:
@@ -19,7 +19,7 @@ class Trainer:
         # Initialize Whisper
         print("Loading Whisper...")
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
-        torch_dtype = torch.bfloat16
+        torch_dtype = torch.bfloat16 
 
         self.whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained(
             "openai/whisper-large-v3-turbo",
@@ -41,6 +41,12 @@ class Trainer:
         
         print(f"Whisper model loaded: large-v3-turbo")
         
+        # Initialize Bypass Network
+        print("\nInitializing Bypass Network...")
+        self.bypass_network = BypassNetwork(
+            whisper_hidden_dim=1280  # large-v3-turbo hidden dimension
+        )
+        
         # Initialize Kokoro Synthesizer
         print("\nInitializing Kokoro...")
         self.speech_synthesis = KokoroSynthesizer(
@@ -57,6 +63,15 @@ class Trainer:
         self.whisper_model.to(self.whisper_device)
         self.bypass_network.to(self.training_device)
         self.speech_synthesis.to(self.training_device)
+        
+        # Initialize optimizer and scaler for mixed precision training
+        self.optimizer = AdamW(
+            list(self.bypass_network.parameters()) + 
+            list(self.speech_synthesis.parameters()),
+            lr=config.get('learning_rate', 3e-4)
+        )
+        self.scaler = GradScaler('cuda:1')
+        self.config = config
     
     def print_tensor_stats(self, tensor, name):
         """Helper to print tensor statistics"""
