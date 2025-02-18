@@ -1,23 +1,35 @@
 import torch
 from torch.utils.data import Dataset
 from src.utils.audio import load_audio, process_length, compute_spectrogram
-
-class SpeechDataset(Dataset):
-    def __init__(self, audio_files, max_duration=30.0):
+import torchaudio
+   
+class AudioDataset(Dataset):
+    def __init__(self, audio_files):
         self.audio_files = audio_files
-        self.max_samples = int(max_duration * 16000)  # 16kHz sampling rate
         
     def __len__(self):
         return len(self.audio_files)
-        
+    
     def __getitem__(self, idx):
-        # Load and preprocess audio
-        audio = load_audio(self.audio_files[idx])
-        audio = process_length(audio, self.max_samples)
-        mel_spec = compute_spectrogram(audio)
+        audio_path = self.audio_files[idx]
+        
+        # Load audio file
+        waveform, sample_rate = torchaudio.load(audio_path)
+        
+        # Ensure mono audio
+        if waveform.shape[0] > 1:
+            waveform = waveform.mean(dim=0, keepdim=True)
+        
+        # Resample if necessary
+        if sample_rate != 16000:
+            resampler = torchaudio.transforms.Resample(sample_rate, 16000)
+            waveform = resampler(waveform)
+        
+        # Compute mel spectrogram
+        mel_spec = compute_spectrogram(waveform)
         
         return {
-            'audio': audio,
+            'audio': waveform,
             'mel_spec': mel_spec,
-            'audio_path': self.audio_files[idx]
-        } 
+            'path': str(audio_path)
+        }

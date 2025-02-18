@@ -8,6 +8,8 @@ from src.models.bypass import BypassNetwork
 from src.utils.audio import compute_spectrogram
 import whisper
 import numpy as np
+from src.training.dataset import AudioDataset
+
 
 
 class Trainer:
@@ -65,15 +67,15 @@ class Trainer:
         print("\n--- Whisper Processing ---")
         with torch.no_grad():
             try:
-                whisper_result = self.whisper_model(
-                    mel_spec.to(self.whisper_device),
-                    return_timestamps=True
-                )
-                print(f"\nWhisper Text Output: {whisper_result.text}")
+                # Get features from Whisper's encoder
+                features = self.whisper_model.encoder(mel_spec.to(self.whisper_device))
                 
-                # Get encoder features
-                encoder_output = whisper_result.encoder_output
-                self.print_tensor_stats(encoder_output, "Whisper Encoder Output")
+                # Get text from Whisper's decoder
+                result = self.whisper_model.decode(features)
+                text = result.text
+                print(f"\nWhisper Text Output: {text}")
+                
+                self.print_tensor_stats(features, "Whisper Encoder Output")
                 
             except Exception as e:
                 print(f"Error in Whisper processing: {str(e)}")
@@ -83,7 +85,7 @@ class Trainer:
         print("\n--- Kokoro Processing ---")
         try:
             generated_speech, phonemes = self.speech_synthesis(
-                text=whisper_result.text,
+                text=text,
                 bypass_features=None  # No bypass features yet
             )
             
@@ -95,7 +97,7 @@ class Trainer:
             raise
         
         return {
-            'text': whisper_result.text,
+            'text': text,
             'generated_speech': generated_speech,
             'phonemes': phonemes
         }
@@ -113,12 +115,13 @@ class Trainer:
         
         # Process through Whisper
         with torch.no_grad():
-            whisper_result = self.whisper_model(
-                mel_spec.to(self.whisper_device),
-                return_timestamps=True
+            # Get features from encoder
+            whisper_features = self.whisper_model.encoder(
+                mel_spec.to(self.whisper_device)
             )
-            text = whisper_result.text
-            whisper_features = whisper_result.encoder_output
+            # Get text from decoder
+            result = self.whisper_model.decode(whisper_features)
+            text = result.text
             whisper_features = whisper_features.to(self.training_device)
         
         # Process through bypass network
