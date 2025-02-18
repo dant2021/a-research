@@ -33,8 +33,8 @@ class BypassNetwork(nn.Module):
         self.transformer_layers = nn.ModuleList([
             TransformerLayer(
                 d_model=whisper_hidden_dim,
-                nhead=12,
-                dim_feedforward=4 * whisper_hidden_dim
+                nhead=16,
+                dim_feedforward= whisper_hidden_dim
             ) for _ in range(3)
         ])
         
