@@ -6,7 +6,7 @@ from torch.cuda.amp import autocast, GradScaler
 from src.models.synthesis import KokoroSynthesizer
 from src.models.bypass import BypassNetwork
 from src.utils.audio import compute_spectrogram
-import whisper
+from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 import numpy as np
 from src.training.dataset import AudioDataset
 
@@ -18,13 +18,28 @@ class Trainer:
         
         # Initialize Whisper
         print("Loading Whisper...")
-        self.whisper_model = whisper.load_model(config['whisper_model'])
-        print(f"Whisper model loaded: {config['whisper_model']}")
-        
-        # Initialize Bypass Network
-        self.bypass_network = BypassNetwork(
-            whisper_hidden_dim=config['whisper_hidden_dim']
+        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        torch_dtype = torch.bfloat16
+
+        self.whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained(
+            "openai/whisper-large-v3-turbo",
+            torch_dtype=torch_dtype,
+            low_cpu_mem_usage=True,
+            use_safetensors=True
         )
+        self.whisper_processor = AutoProcessor.from_pretrained("openai/whisper-large-v3-turbo")
+        
+        # Create pipeline
+        self.whisper_pipe = pipeline(
+            "automatic-speech-recognition",
+            model=self.whisper_model,
+            tokenizer=self.whisper_processor.tokenizer,
+            feature_extractor=self.whisper_processor.feature_extractor,
+            torch_dtype=torch_dtype,
+            device=device,
+        )
+        
+        print(f"Whisper model loaded: large-v3-turbo")
         
         # Initialize Kokoro Synthesizer
         print("\nInitializing Kokoro...")
@@ -59,27 +74,23 @@ class Trainer:
         
         # 1. Input audio stats
         audio = batch['audio']
-        mel_spec = batch['mel_spec']
         self.print_tensor_stats(audio, "Input Audio")
-        self.print_tensor_stats(mel_spec, "Input Mel Spectrogram")
         
         # 2. Whisper processing
         print("\n--- Whisper Processing ---")
-        with torch.no_grad():
-            try:
-                # Get features from Whisper's encoder
-                features = self.whisper_model.encoder(mel_spec.to(self.whisper_device))
-                
-                # Get text from Whisper's decoder
-                result = self.whisper_model.decode(features)
-                text = result.text
-                print(f"\nWhisper Text Output: {text}")
-                
-                self.print_tensor_stats(features, "Whisper Encoder Output")
-                
-            except Exception as e:
-                print(f"Error in Whisper processing: {str(e)}")
-                raise
+        try:
+            # Process through Whisper pipeline
+            result = self.whisper_pipe(
+                audio.squeeze(0).numpy(),  # Remove batch dimension and convert to numpy
+                return_timestamps=True,
+                generate_kwargs={"language": "english"}
+            )
+            text = result["text"]
+            print(f"\nWhisper Text Output: {text}")
+            
+        except Exception as e:
+            print(f"Error in Whisper processing: {str(e)}")
+            raise
         
         # 3. Kokoro processing
         print("\n--- Kokoro Processing ---")

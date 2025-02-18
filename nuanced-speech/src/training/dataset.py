@@ -1,8 +1,7 @@
 import torch
-from torch.utils.data import Dataset
-from src.utils.audio import load_audio, process_length, compute_spectrogram
 import torchaudio
-   
+from torch.utils.data import Dataset
+
 class AudioDataset(Dataset):
     def __init__(self, audio_files):
         self.audio_files = audio_files
@@ -25,11 +24,7 @@ class AudioDataset(Dataset):
             resampler = torchaudio.transforms.Resample(sample_rate, 16000)
             waveform = resampler(waveform)
         
-        # Compute mel spectrogram
-        mel_spec = compute_spectrogram(waveform)
-        
         return {
             'audio': waveform,
-            'mel_spec': mel_spec,
             'path': str(audio_path)
         }
