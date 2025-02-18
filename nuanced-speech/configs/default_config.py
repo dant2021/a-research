@@ -6,11 +6,11 @@ config = {
     'max_steps': 100000,
     'eval_steps': 1000,
     'save_steps': 5000,
-    'whisper_model': 'base',
+    'whisper_model': 'large-v3-turbo',
     'freeze_whisper': True,
     'num_gpu': 2,
-    'precision': 'fp16',
-    'whisper_hidden_dim': 768,  # for base model
+    'precision': 'bf16',
+    'whisper_hidden_dim': 1280,  # for base model
     'kokoro_voice': 'af_heart',  # Kokoro voice to use
     'kokoro_lang_code': 'a',     # 'a' for American English
     'feature_loss_weight': 0.1,
