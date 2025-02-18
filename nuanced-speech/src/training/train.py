@@ -70,7 +70,7 @@ class Trainer:
             list(self.speech_synthesis.parameters()),
             lr=config.get('learning_rate', 3e-4)
         )
-        self.scaler = GradScaler(device_id=1 if torch.cuda.is_available() else 0)
+        self.scaler = GradScaler("cuda")
         self.config = config
     
     def print_tensor_stats(self, tensor, name):
