@@ -23,13 +23,14 @@ class Trainer:
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
         torch_dtype = torch.bfloat16 
 
+        model_id = "openai/whisper-large-v3-turbo"
         self.whisper_model = AutoModelForSpeechSeq2Seq.from_pretrained(
-            "openai/whisper-large-v3-turbo",
+            model_id,
             torch_dtype=torch_dtype,
             low_cpu_mem_usage=True,
             use_safetensors=True
         )
-        self.whisper_processor = AutoProcessor.from_pretrained("openai/whisper-large-v3-turbo")
+        self.whisper_processor = AutoProcessor.from_pretrained(model_id)
         
         # Create pipeline
         self.whisper_pipe = pipeline(
@@ -76,11 +77,11 @@ class Trainer:
         )
         self.scaler = torch.amp.GradScaler('cuda')
         self.config = config
-        
+        """
         # Create directories
         os.makedirs(config['checkpoint_dir'], exist_ok=True)
         os.makedirs(config['sample_dir'], exist_ok=True)
-        
+        """
     def print_tensor_stats(self, tensor, name):
         """Helper to print tensor statistics"""
         if isinstance(tensor, torch.Tensor):
@@ -98,13 +99,33 @@ class Trainer:
         
         # Get text from Whisper
         with torch.no_grad():
-            # Process single audio sample
+            # Process single audio sample - ensure it's 1D mono
             audio_np = audio_seq[0].cpu().numpy()  # Get first (and only) item from batch
-            result = self.whisper_pipe(audio_np, return_timestamps=True)
-            text = result["text"]  # Remove .to() since text is a string
             
-            # Get whisper features for single sample
-            whisper_features = self.whisper_model.encode(audio_seq)
+            # Convert stereo to mono by averaging channels if needed
+            if len(audio_np.shape) > 1 and audio_np.shape[0] == 2:
+                audio_np = audio_np.mean(axis=0)  # Average the channels
+            elif len(audio_np.shape) > 1:
+                audio_np = audio_np.squeeze()
+            
+            # Ensure we have a 1D array
+            if len(audio_np.shape) != 1:
+                raise ValueError(f"Failed to convert to 1D array, got shape {audio_np.shape}")
+            
+            # Get text transcription
+            result = self.whisper_pipe(audio_np, return_timestamps=True)
+            text = result["text"]
+            
+            # Get whisper features by processing the audio through the encoder
+            input_features = self.whisper_processor(
+                audio_np, 
+                sampling_rate=16000, 
+                return_tensors="pt"
+            ).input_features.to(self.whisper_device)
+            
+            # Get encoder outputs directly from the encoder
+            encoder_outputs = self.whisper_model.get_encoder()(input_features)
+            whisper_features = encoder_outputs.last_hidden_state
             whisper_features = whisper_features.to(self.training_device)
         
         # Now predict style features aligned with phoneme length
@@ -149,7 +170,7 @@ class Trainer:
                 # Generate validation sample
                 if step % self.config['validate_steps'] == 0:
                     self.generate_sample(batch, f"validation_e{epoch}_s{step}.wav")
-
+"""
     def save_checkpoint(self, epoch, step):
         checkpoint = {
             'epoch': epoch,
@@ -168,7 +189,7 @@ class Trainer:
         self.optimizer.load_state_dict(checkpoint['optimizer_state'])
         self.scaler.load_state_dict(checkpoint['scaler_state'])
         return checkpoint['epoch'], checkpoint['step']
-
+"""
 def main():
     # Create trainer with config
     trainer = Trainer(config)
@@ -193,11 +214,11 @@ def main():
     
     dataloader = DataLoader(
         dataset,
-        batch_size=config['batch_size'],
+        batch_size=1,  # Explicitly set batch size to 1
         shuffle=True,
         num_workers=4,
         pin_memory=True,
-        collate_fn=collate_fn  # Add custom collate function if needed
+        collate_fn=collate_fn
     )
     
     # Start training

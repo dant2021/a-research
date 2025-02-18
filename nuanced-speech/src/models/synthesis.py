@@ -12,14 +12,19 @@ class KokoroSynthesizer(nn.Module):
         """
         Args:
             text: Text to synthesize
-            bypass_features: Emotional/intonation features from Whisper encoder
+            bypass_features: Style vector from bypass network [batch, 256]
         Returns:
             audio: Generated audio waveform
         """
-        # Generate base audio with Kokoro
+        # Format bypass features to match Kokoro's expected shape [510, 1, 256]
+        # Take first item from batch and repeat it 510 times
+        voice_features = bypass_features[0].unsqueeze(0)  # [1, 256]
+        voice_features = voice_features.repeat(510, 1, 1)  # [510, 1, 256]
+        
+        # Generate audio with formatted bypass features
         generator = self.pipeline(
             text, 
-            voice=bypass_features,
+            voice=voice_features,
             speed=1.0
         )
         
