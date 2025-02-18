@@ -28,7 +28,7 @@ class TransformerLayer(nn.Module):
         return x
 
 class BypassNetwork(nn.Module):
-    def __init__(self, whisper_hidden_dim=768):
+    def __init__(self, whisper_hidden_dim=1280):
         super().__init__()
         self.transformer_layers = nn.ModuleList([
             TransformerLayer(
