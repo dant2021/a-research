@@ -70,7 +70,7 @@ class Trainer:
             list(self.speech_synthesis.parameters()),
             lr=config.get('learning_rate', 3e-4)
         )
-        self.scaler = GradScaler('cuda:1')
+        self.scaler = GradScaler(device_id=1 if torch.cuda.is_available() else 0)
         self.config = config
     
     def print_tensor_stats(self, tensor, name):
@@ -94,9 +94,13 @@ class Trainer:
         # 2. Whisper processing
         print("\n--- Whisper Processing ---")
         try:
+            # Convert audio to the correct format for Whisper
+            # Remove batch and channel dimensions and convert to numpy
+            audio_for_whisper = audio.squeeze().cpu().numpy()
+            
             # Process through Whisper pipeline
             result = self.whisper_pipe(
-                audio.squeeze(0).numpy(),  # Remove batch dimension and convert to numpy
+                audio_for_whisper,
                 return_timestamps=True,
                 generate_kwargs={"language": "english"}
             )
