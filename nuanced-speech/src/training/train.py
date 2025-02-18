@@ -3,9 +3,9 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.cuda.amp import autocast, GradScaler
-from ..models.synthesis import KokoroSynthesizer
-from ..models.bypass import BypassNetwork
-from ..utils.audio import compute_spectrogram
+from models.synthesis import KokoroSynthesizer
+from models.bypass import BypassNetwork
+from utils.audio import compute_spectrogram
 import whisper
 import numpy as np
 
