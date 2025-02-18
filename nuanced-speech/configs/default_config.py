@@ -1,5 +1,6 @@
 config = {
-    'batch_size': 8,
+    'num_epochs': 10,
+    'batch_size': 1,
     'gradient_accumulation_steps': 4,
     'learning_rate': 3e-4,
     'warmup_steps': 1000,

@@ -74,7 +74,7 @@ class Trainer:
             self.bypass_network.parameters(), 
             lr=config['learning_rate']
         )
-        self.scaler = GradScaler("cuda")
+        self.scaler = torch.amp.GradScaler('cuda')
         self.config = config
         
         # Create directories
@@ -98,16 +98,15 @@ class Trainer:
         
         # Get text from Whisper
         with torch.no_grad():
-            # Get text from whisper pipeline
-            audio_np = audio_seq.squeeze().cpu().numpy()
+            # Process single audio sample
+            audio_np = audio_seq[0].cpu().numpy()  # Get first (and only) item from batch
             result = self.whisper_pipe(audio_np, return_timestamps=True)
-            text = result["text"].to(self.training_device)
+            text = result["text"]  # Remove .to() since text is a string
             
-            # Get whisper features
+            # Get whisper features for single sample
             whisper_features = self.whisper_model.encode(audio_seq)
             whisper_features = whisper_features.to(self.training_device)
         
-
         # Now predict style features aligned with phoneme length
         style_features = self.bypass_network(whisper_features)  # [batch, seq_len, 256]
         
@@ -176,16 +175,29 @@ def main():
     
     # Create dataset and dataloader
     dataset = AudioDataset(
-        audio_files=[...],  # List of audio file paths
-        max_duration=30.0   # 30 seconds max
+        audio_files="your audio files as a list",
+        chunk_duration=30.0
     )
+
+    def collate_fn(batch):
+        # Filter out None values
+        batch = [item for item in batch if item is not None]
+        if len(batch) == 0:
+            return None
+            
+        # Assuming each item in batch is a dictionary with 'audio' and 'target_audio' keys
+        return {
+            'audio': torch.stack([item['audio'] for item in batch]),
+            'target_audio': torch.stack([item['target_audio'] for item in batch])
+        }
     
     dataloader = DataLoader(
         dataset,
         batch_size=config['batch_size'],
         shuffle=True,
         num_workers=4,
-        pin_memory=True
+        pin_memory=True,
+        collate_fn=collate_fn  # Add custom collate function if needed
     )
     
     # Start training
