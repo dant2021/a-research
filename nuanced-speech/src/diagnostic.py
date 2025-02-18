@@ -1,7 +1,7 @@
 import torch
 from pathlib import Path
-from training.train import Trainer
-from training.dataset import SpeechDataset
+from src.training.train import Trainer
+from src.training.dataset import SpeechDataset
 from torch.utils.data import DataLoader
 from configs.default_config import config
 

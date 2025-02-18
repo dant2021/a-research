@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import Dataset
-from ..utils.audio import load_audio, process_length, compute_spectrogram
+from src.utils.audio import load_audio, process_length, compute_spectrogram
 
 class SpeechDataset(Dataset):
     def __init__(self, audio_files, max_duration=30.0):
