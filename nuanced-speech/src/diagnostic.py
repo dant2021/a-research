@@ -1,7 +1,7 @@
 import torch
 from pathlib import Path
 from src.training.train import Trainer
-from src.training.dataset import SpeechDataset
+from src.training.dataset import AudioDataset
 from torch.utils.data import DataLoader
 from configs.default_config import config
 
@@ -16,7 +16,7 @@ def run_diagnostic():
     print(f"\nFound {len(audio_files)} audio files")
     
     # Create dataset and dataloader
-    dataset = SpeechDataset(audio_files)
+    dataset = AudioDataset(audio_files)
     dataloader = DataLoader(dataset, batch_size=1, shuffle=True)
     
     # Initialize trainer
