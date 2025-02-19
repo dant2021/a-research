@@ -1,17 +1,12 @@
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.cuda.amp import autocast
 from src.models.synthesis import KokoroSynthesizer
-from src.models.bypass import BypassNetwork
+from src.models.style_voice import StyleVoice
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
-import numpy as np
 from src.training.dataset import AudioDataset
 from configs.default_config import config
-import torch.nn.functional as F
 from src.models.losses import MultiResolutionSTFTLoss
-import os
 
 class Trainer:
     def __init__(self, config):
@@ -45,7 +40,7 @@ class Trainer:
         
         # Initialize Bypass Network
         print("\nInitializing Bypass Network...")
-        self.bypass_network = BypassNetwork(
+        self.bypass_network = StyleVoice(
             whisper_hidden_dim=config['whisper_hidden_dim'], #1280
             style_dim=256  # Fixed for Kokoro
         )
@@ -143,8 +138,6 @@ class Trainer:
                 self.scaler.scale(loss).backward()
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
-                
-
 
 def main():
     # Create trainer with config
