@@ -16,22 +16,20 @@ class KokoroSynthesizer(nn.Module):
         Returns:
             audio: Generated audio waveform
         """
-        # Load the default voice tensor
+        # Load voice tensor [1500, 256]
         voice_tensor = self.pipeline.load_voice(self.voice)
+        print(voice_tensor.shape)
+        print(bypass_features.shape)
         
-        # Replace the nth position with our bypass features
-        # Take first item from batch
-        for i in range(bypass_features.shape[0]):
-            voice_tensor[i] = bypass_features[i]  
+        # Remove batch dimension and align lengths
+        style_features = bypass_features[0]  # [seq_len, 256]
+        seq_len = min(style_features.shape[0], voice_tensor.shape[0])
         
-        # Generate audio with modified voice tensor
-        generator = self.pipeline(
-            text, 
-            voice=voice_tensor,
-            speed=1.0
-        )
+        # Replace first 'seq_len' slots
+        voice_tensor[:seq_len] = style_features[:seq_len]
         
-        # Get the first (and only) audio segment
+        # Generate audio
+        generator = self.pipeline(text, voice=voice_tensor, speed=1.0)
         for _, phonemes, audio in generator:
             break
             
