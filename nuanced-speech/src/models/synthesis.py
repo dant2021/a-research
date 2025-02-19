@@ -8,12 +8,11 @@ class KokoroSynthesizer(nn.Module):
         self.pipeline = KPipeline(lang_code=lang_code)
         self.voice = voice
         
-    def forward(self, text, word_style_features, word_boundaries):
+    def forward(self, text, style_features):
         """
         Args:
             text: Raw text from Whisper
-            word_style_features: [num_words, 256]
-            word_boundaries: List of (start, end) times for each word
+            style_features: [num_words, 256]
         """
         # Convert text to words with phonemes
         words = self.pipeline.split_words(text)
@@ -28,7 +27,7 @@ class KokoroSynthesizer(nn.Module):
             # Assign same style vector to all phonemes in the word
             for ph in word_phonemes:
                 phonemes.append(ph)
-                style_vectors.append(word_style_features[word_idx])
+                style_vectors.append(style_features[word_idx])
         
         # Create voice tensor from aligned style vectors
         voice_tensor = torch.stack(style_vectors)  # [num_phonemes, 256]
