@@ -40,7 +40,7 @@ class Trainer:
         
         # Initialize Bypass Network
         print("\nInitializing Bypass Network...")
-        self.bypass_network = StyleVoice(
+        self.style_vector_network = StyleVoice(
             whisper_hidden_dim=config['whisper_hidden_dim'], #1280
             style_dim=256  # Fixed for Kokoro
         )
@@ -58,7 +58,7 @@ class Trainer:
         
         # Move models to devices
         self.whisper_model.to(self.whisper_device)
-        self.bypass_network.to(self.training_device)
+        self.style_vector_network.to(self.training_device)
         self.speech_synthesis.to(self.training_device)
         
         # Initialize loss
@@ -66,7 +66,7 @@ class Trainer:
         
         # Initialize optimizer with gradient accumulation
         self.optimizer = AdamW(
-            self.bypass_network.parameters(), 
+            self.style_vector_network.parameters(), 
             lr=config['learning_rate']
         )
         self.scaler = torch.amp.GradScaler('cuda')
@@ -95,6 +95,7 @@ class Trainer:
             # Get text transcription
             result = self.whisper_pipe(audio_np, return_timestamps=True)
             text = result["text"]
+            word_boundaries = result["chunks"]  # (start/end times in sec)
             
             # Get whisper features by processing the audio through the encoder
             input_features = self.whisper_processor(
@@ -106,17 +107,30 @@ class Trainer:
             # Get encoder outputs directly from the encoder
             encoder_outputs = self.whisper_model.get_encoder()(input_features)
             whisper_features = encoder_outputs.last_hidden_state
-            whisper_features = whisper_features.to(self.training_device)
+            
+            # Calculate frame rate properly
+            total_frames = whisper_features.shape[1]
+            frame_rate = total_frames / 30  # 30s audio
+            
+            # Convert word boundaries to frame indices
+            word_frames = [
+                (int(chunk['timestamp'][0]*frame_rate), 
+                 int(chunk['timestamp'][1]*frame_rate))
+                for chunk in result['chunks']
+            ]
         
-        # Now predict style features aligned with phoneme length
-        style_features = self.bypass_network(whisper_features)  # [batch, seq_len, 256]
+        # Now predict word-level style features
+        style_features = self.style_vector_network(
+            whisper_features.to(self.training_device),
+            word_frames
+        )
         
         # Generate final audio with style features
         with torch.set_grad_enabled(True):
             with autocast():
                 generated_audio, _ = self.speech_synthesis(
                     text=text,
-                    bypass_features=style_features  # Will be used as voice parameter
+                    style_features=style_features  # Will be used as voice parameter
                 )
                 loss = self.stft_loss(generated_audio, target_audio)
         
@@ -125,7 +139,7 @@ class Trainer:
     def train(self, train_dataloader):
         self.whisper_model.eval()  # Freeze whisper
         self.speech_synthesis.eval()  # Freeze synthesis but keep grad
-        self.bypass_network.train()
+        self.style_vector_network.train()
         
         for epoch in range(self.config['num_epochs']):
             for step, batch in enumerate(train_dataloader):

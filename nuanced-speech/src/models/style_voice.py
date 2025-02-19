@@ -24,15 +24,19 @@ class StyleVoice(nn.Module):
             nn.Linear(style_dim, style_dim)
         )
 
-    def forward(self, encoder_output):
-        # encoder_output: [batch, seq_len, 1280]
-        x = encoder_output
+    def forward(self, encoder_output, word_boundaries):
+        """
+        encoder_output: [batch, seq_len, 1280]
+        word_boundaries: List of (start, end) in frames
+        """
+        # Process encoder output
+        x = self.transformer_layers(encoder_output)
+        style_features = self.style_proj(x)  # [seq_len, 256]
         
-        # Pass through transformer layers
-        for layer in self.transformer_layers:
-            x = layer(x)
+        # Average features within each word boundary
+        word_style = []
+        for start, end in word_boundaries:
+            word_vec = style_features[start:end].mean(dim=0)
+            word_style.append(word_vec)
             
-        # Project to style dimension
-        style_features = self.style_proj(x)  # [batch, seq_len, 256]
-        
-        return style_features 
+        return torch.stack(word_style)  # [num_words, 256] 
