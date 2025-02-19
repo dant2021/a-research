@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-class BypassNetwork(nn.Module):
+class StyleVoice(nn.Module):
     def __init__(self, whisper_hidden_dim=1280, style_dim=256):
         super().__init__()
         self.transformer_layers = nn.ModuleList([

@@ -12,19 +12,22 @@ class KokoroSynthesizer(nn.Module):
         """
         Args:
             text: Text to synthesize
-            bypass_features: Style vector from bypass network [batch, 256]
+            bypass_features: Style vector [batch, 256] to replace the nth token's style
         Returns:
             audio: Generated audio waveform
         """
-        # Format bypass features to match Kokoro's expected shape [510, 1, 256]
-        # Take first item from batch and repeat it 510 times
-        voice_features = bypass_features[0].unsqueeze(0)  # [1, 256]
-        voice_features = voice_features.repeat(510, 1, 1)  # [510, 1, 256]
+        # Load the default voice tensor
+        voice_tensor = self.pipeline.load_voice(self.voice)
         
-        # Generate audio with formatted bypass features
+        # Replace the nth position with our bypass features
+        # Take first item from batch
+        for i in range(bypass_features.shape[0]):
+            voice_tensor[i] = bypass_features[i]  
+        
+        # Generate audio with modified voice tensor
         generator = self.pipeline(
             text, 
-            voice=voice_features,
+            voice=voice_tensor,
             speed=1.0
         )
         

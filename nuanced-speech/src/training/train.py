@@ -2,10 +2,9 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
-from torch.cuda.amp import autocast, GradScaler
+from torch.cuda.amp import autocast
 from src.models.synthesis import KokoroSynthesizer
 from src.models.bypass import BypassNetwork
-from src.utils.audio import compute_spectrogram
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 import numpy as np
 from src.training.dataset import AudioDataset
@@ -77,11 +76,7 @@ class Trainer:
         )
         self.scaler = torch.amp.GradScaler('cuda')
         self.config = config
-        """
-        # Create directories
-        os.makedirs(config['checkpoint_dir'], exist_ok=True)
-        os.makedirs(config['sample_dir'], exist_ok=True)
-        """
+
     def print_tensor_stats(self, tensor, name):
         """Helper to print tensor statistics"""
         if isinstance(tensor, torch.Tensor):
@@ -99,18 +94,7 @@ class Trainer:
         
         # Get text from Whisper
         with torch.no_grad():
-            # Process single audio sample - ensure it's 1D mono
-            audio_np = audio_seq[0].cpu().numpy()  # Get first (and only) item from batch
-            
-            # Convert stereo to mono by averaging channels if needed
-            if len(audio_np.shape) > 1 and audio_np.shape[0] == 2:
-                audio_np = audio_np.mean(axis=0)  # Average the channels
-            elif len(audio_np.shape) > 1:
-                audio_np = audio_np.squeeze()
-            
-            # Ensure we have a 1D array
-            if len(audio_np.shape) != 1:
-                raise ValueError(f"Failed to convert to 1D array, got shape {audio_np.shape}")
+            audio_np = audio_seq.cpu().numpy()
             
             # Get text transcription
             result = self.whisper_pipe(audio_np, return_timestamps=True)
@@ -160,66 +144,16 @@ class Trainer:
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
                 
-                if step % self.config['log_steps'] == 0:
-                    print(f"Epoch {epoch}, Step {step}: Loss {loss.item():.4f}")
-                
-                # Save checkpoint
-                if step % self.config['save_steps'] == 0:
-                    self.save_checkpoint(epoch, step)
-                
-                # Generate validation sample
-                if step % self.config['validate_steps'] == 0:
-                    self.generate_sample(batch, f"validation_e{epoch}_s{step}.wav")
-"""
-    def save_checkpoint(self, epoch, step):
-        checkpoint = {
-            'epoch': epoch,
-            'step': step,
-            'bypass_state': self.bypass_network.state_dict(),
-            'optimizer_state': self.optimizer.state_dict(),
-            'scaler_state': self.scaler.state_dict(),
-            'config': self.config
-        }
-        path = os.path.join(self.config['checkpoint_dir'], f'checkpoint_e{epoch}_s{step}.pt')
-        torch.save(checkpoint, path)
-        
-    def load_checkpoint(self, checkpoint_path):
-        checkpoint = torch.load(checkpoint_path)
-        self.bypass_network.load_state_dict(checkpoint['bypass_state'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state'])
-        self.scaler.load_state_dict(checkpoint['scaler_state'])
-        return checkpoint['epoch'], checkpoint['step']
-"""
+
+
 def main():
     # Create trainer with config
     trainer = Trainer(config)
     
-    # Create dataset and dataloader
-    dataset = AudioDataset(
-        audio_files="your audio files as a list",
-        chunk_duration=30.0
-    )
-
-    def collate_fn(batch):
-        # Filter out None values
-        batch = [item for item in batch if item is not None]
-        if len(batch) == 0:
-            return None
-            
-        # Assuming each item in batch is a dictionary with 'audio' and 'target_audio' keys
-        return {
-            'audio': torch.stack([item['audio'] for item in batch]),
-            'target_audio': torch.stack([item['target_audio'] for item in batch])
-        }
-    
-    dataloader = DataLoader(
-        dataset,
-        batch_size=1,  # Explicitly set batch size to 1
-        shuffle=True,
-        num_workers=4,
-        pin_memory=True,
-        collate_fn=collate_fn
-    )
+    # Initialize dataset with desired batch size
+    dataset = AudioDataset(audio_files="your audio files as a list", chunk_duration=30.0, batch_size=32, num_workers=4)
+    # Get the dataloader
+    dataloader = dataset.get_dataloader()
     
     # Start training
     trainer.train(dataloader)
