@@ -34,6 +34,7 @@ class Trainer:
             feature_extractor=self.whisper_processor.feature_extractor,
             torch_dtype=torch_dtype,
             device=device,
+            generate_kwargs={"return_timestamps": True}  # Force timestamp generation
         )
         
         print(f"Whisper model loaded: large-v3-turbo")
@@ -113,11 +114,18 @@ class Trainer:
             frame_rate = total_frames / 30  # 30s audio
             
             # Convert word boundaries to frame indices
-            word_frames = [
-                (int(chunk['timestamp'][0]*frame_rate), 
-                 int(chunk['timestamp'][1]*frame_rate))
-                for chunk in result['chunks']
-            ]
+            word_frames = []
+            for chunk in result['chunks']:
+                start = chunk['timestamp'][0]
+                end = chunk['timestamp'][1]
+                
+                if start is None or end is None:
+                    print(f"Skipping chunk with missing timestamps: {chunk['text']}")
+                    continue
+                
+                start_frame = int(start * frame_rate)
+                end_frame = int(end * frame_rate)
+                word_frames.append((start_frame, end_frame))
         
         # Now predict word-level style features
         style_features = self.style_vector_network(
@@ -130,7 +138,7 @@ class Trainer:
             with autocast():
                 generated_audio, _ = self.speech_synthesis(
                     text=text,
-                    style_features=style_features  # Will be used as voice parameter
+                    style_features=style_features
                 )
                 loss = self.stft_loss(generated_audio, target_audio)
         

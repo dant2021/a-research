@@ -30,13 +30,19 @@ class StyleVoice(nn.Module):
         word_boundaries: List of (start, end) in frames
         """
         # Process encoder output
-        x = self.transformer_layers(encoder_output)
-        style_features = self.style_proj(x)  # [seq_len, 256]
+        x = encoder_output
+        for layer in self.transformer_layers:
+            x = layer(x)
+        style_features = self.style_proj(x)  # [batch, seq_len, 256]
         
         # Average features within each word boundary
-        word_style = []
-        for start, end in word_boundaries:
-            word_vec = style_features[start:end].mean(dim=0)
-            word_style.append(word_vec)
-            
-        return torch.stack(word_style)  # [num_words, 256] 
+        batch_style = []
+        for batch_idx in range(style_features.shape[0]):
+            word_style = []
+            for start, end in word_boundaries:
+                # Get features for this word in current batch
+                word_vec = style_features[batch_idx, start:end].mean(dim=0)
+                word_style.append(word_vec)
+            batch_style.append(torch.stack(word_style))
+        
+        return torch.stack(batch_style)  # [batch, num_words, 256] 
