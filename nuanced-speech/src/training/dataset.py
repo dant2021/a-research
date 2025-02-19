@@ -29,7 +29,6 @@ class AudioDataset(Dataset):
         # Get total chunks
         total_chunks = waveform.size(-1) // self.chunk_samples
         if total_chunks == 0:
-            # Handle audio shorter than chunk_samples
             waveform = torch.nn.functional.pad(waveform, (0, self.chunk_samples - waveform.size(-1)))
             total_chunks = 1
         
@@ -38,8 +37,8 @@ class AudioDataset(Dataset):
         start_idx = chunk_idx * self.chunk_samples
         chunk = waveform[..., start_idx:start_idx + self.chunk_samples]
         
-        # Ensure shape is [1, samples] for mono audio
-        chunk = chunk.squeeze(0)  # Remove channel dimension for Whisper
+        # Ensure shape is [samples] for Whisper (1D array)
+        chunk = chunk.squeeze()  # Remove all singleton dimensions
         
         return {
             'audio': chunk,

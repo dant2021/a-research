@@ -89,7 +89,8 @@ class Trainer:
         
         # Get text from Whisper
         with torch.no_grad():
-            audio_np = audio_seq.cpu().numpy()
+            # Ensure audio is in the correct format for Whisper (1D array)
+            audio_np = audio_seq[0].cpu().numpy()  # Get first item from batch
             
             # Get text transcription
             result = self.whisper_pipe(audio_np, return_timestamps=True)
