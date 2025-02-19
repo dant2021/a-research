@@ -17,36 +17,34 @@ class AudioDataset(Dataset):
         audio_path = self.audio_files[idx]
         waveform, sr = torchaudio.load(audio_path)
         
-        # Convert stereo to mono by averaging channels if needed
-        waveform = waveform.numpy()
-        if len(waveform.shape) > 1 and waveform.shape[0] == 2:
-            waveform = waveform.mean(axis=0)  # Average the channels
-        elif len(waveform.shape) > 1:
-            waveform = waveform.squeeze()
-            
-        # Ensure we have a 1D array
-        if len(waveform.shape) != 1:
-            raise ValueError(f"Failed to convert to 1D array, got shape {waveform.shape}")
-            
-        waveform = torch.from_numpy(waveform).float()
-        
         # Resample if needed
         if sr != self.sample_rate:
             resampler = torchaudio.transforms.Resample(sr, self.sample_rate)
             waveform = resampler(waveform)
         
+        # Convert stereo to mono by averaging channels if needed
+        if waveform.shape[0] > 1:
+            waveform = waveform.mean(dim=0, keepdim=True)
+        
         # Get total chunks
         total_chunks = waveform.size(-1) // self.chunk_samples
+        if total_chunks == 0:
+            # Handle audio shorter than chunk_samples
+            waveform = torch.nn.functional.pad(waveform, (0, self.chunk_samples - waveform.size(-1)))
+            total_chunks = 1
         
         # Randomly select a chunk
         chunk_idx = torch.randint(0, total_chunks, (1,))
         start_idx = chunk_idx * self.chunk_samples
         chunk = waveform[..., start_idx:start_idx + self.chunk_samples]
         
+        # Ensure shape is [1, samples] for mono audio
+        chunk = chunk.squeeze(0)  # Remove channel dimension for Whisper
+        
         return {
             'audio': chunk,
-            'target_audio': chunk,  # Same audio for now
-            'text': None  # We'll get this from Whisper
+            'target_audio': chunk,
+            'text': None
         }
     
     @staticmethod

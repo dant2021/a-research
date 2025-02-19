@@ -54,7 +54,7 @@ class Trainer:
         
         # Setup devices
         self.whisper_device = torch.device("cuda:0")
-        self.training_device = torch.device("cuda:1")
+        self.training_device = torch.device("cuda:0")
         
         # Move models to devices
         self.whisper_model.to(self.whisper_device)
