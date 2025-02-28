@@ -76,7 +76,7 @@ graph LR
     end
 
     subgraph "Bypass Processing"
-        B --> E[3x Transformer + MLP]
+        B --> E[Style Decoder]
         E --> F[Bypass Features]
     end
 
