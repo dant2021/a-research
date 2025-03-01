@@ -35,16 +35,6 @@ pip install -r requirements.txt
 python train_v2_multispeech.py
 ```
 
-## Project Structure
-```
-nuanced-speech/
-├── train_v2_multispeech.py  # Main training script
-├── custom_stft.py           # Custom STFT implementation
-├── losses.py                # Loss functions implementation
-├── models/                  # Saved models directory
-└── outputs/                 # Generated audio outputs
-```
-
 ## Architecture
 The project uses a StyleEncoder to extract and transfer speech characteristics:
 
