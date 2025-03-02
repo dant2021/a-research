@@ -11,12 +11,6 @@ This project aims to preserve and transfer speech characteristics (emotion, tone
 - Multi-voice training for style transfer
 - STFT and style similarity loss functions for better audio quality
 
-## Requirements
-- 24GB GPU (RTX 3090 or equivalent)
-
-## Important Note
-To run this project, you need to remove the `@torch.no_grad()` decorator in the Kokoro `model.py` file to allow for gradient flow during training.
-
 ## Installation
 ```bash
 # Clone the repository
@@ -32,6 +26,11 @@ pip install -r requirements.txt
 # Run the training script
 python train_v2_multispeech.py
 ```
+## Important Note
+To run this project, you need to remove the `@torch.no_grad()` decorator in the Kokoro [`model.py` file](https://github.com/hexgrad/kokoro/blob/main/kokoro/model.py) to allow for gradient flow during training.
+
+## Requirements
+- 24GB GPU (RTX 3090 or equivalent)
 
 ## Architecture
 The project uses a StyleEncoder to extract and transfer speech characteristics:
