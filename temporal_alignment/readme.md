@@ -68,6 +68,7 @@ gaussian        0.50    0.3893     0.2286     176.12     15.055    4.7633       
 Building on yesterday's discovery, I tried forcing correct durations using a teacher model. This approach worked remarkably well! When the model was given the correct temporal alignment, it suddenly started learning effectively.
 
 This confirmed my hypothesis that duration mismatches were the key problem. Weirdly enough a temporal loss did not work in my initial experiments. The model performance improved dramatically when phoneme durations were explicitly controlled rather than learned through a loss function. (which is still a mystery to me)
+![image](https://github.com/user-attachments/assets/14922359-67fc-4ec8-bca3-456ae3496deb)
 
 ### Friday, March 7, 2025: Whisper and Wav2vec Features
 
