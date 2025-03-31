@@ -60,3 +60,5 @@ The model is trained on a diverse corpus of fonts, with data augmentation to imp
 ## Conclusion
 
 This project emerged from a week of technical frustrations, and demonstrates that deep generative models can effectively learn the underlying patterns of typography. While this is just the beginning, the results suggest exciting possibilities for AI-assisted font design and generation.
+
+PS: You should be able to run this even on a CPU locally. 
