@@ -12,10 +12,6 @@ import torch
 from transformers import Qwen2_5_VLForConditionalGeneration, Qwen2_5_VLProcessor
 from PIL import Image, ImageFont, ImageDraw
 import os
-import numpy as np
-import umap
-import matplotlib.pyplot as plt
-from sklearn.decomposition import PCA
 
 
 def extract_embedding_from_image(image, model, processor, device, path):
@@ -53,7 +49,7 @@ def extract_embedding_from_image(image, model, processor, device, path):
     # The embedding for the image token is at position 0 in the sequence
     last_hidden = outputs.hidden_states[-1]  # shape: (batch, seq_len, hidden_size)
     # save to disk
-    out_path = f"image_embedding_{path}.pt"
+    out_path = f"debug/image_embedding_{path}.pt"
     torch.save(last_hidden.cpu(), out_path)
     print(f"Saved image embedding (shape={last_hidden.shape}) to {out_path}")
     return last_hidden
@@ -90,7 +86,7 @@ def create_font_grid(font_path, chars, grid_size=8, font_size=64):
 
     print(f"Rendered {min(len(chars), grid_size**2)} characters")
     font_name = os.path.basename(font_path).replace('.ttf', '')
-    path = f"font_grid_{font_name}.png"
+    path = f"debug/font_grid_{font_name}.png"
     img.save(path)
     return img
 
@@ -100,6 +96,10 @@ def visualize_embeddings(dict_embeddings):
     Each font is represented by the first 4 principal components 
     of their embeddings to capture the most variance.
     """
+    import numpy as np
+    import umap
+    import matplotlib.pyplot as plt
+    from sklearn.decomposition import PCA
 
     for path, embedding in dict_embeddings.items():
         print(f"path: {path}")
