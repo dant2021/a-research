@@ -8,14 +8,12 @@ This project explores how large vision-language models (VLMs) perceive and disti
 1. **Vision Models Understand Typography**: The model distinguishes fonts along multiple dimensions simultaneously:
    - Font weight (light, regular, bold)
    - Style classification (serif vs. sans-serif)
-   - Character width properties
    - Functional purpose (display vs. body text)
 
 2. **Embedding Visualization Insights**:
    - Bold variants cluster together regardless of font family
    - Serif fonts form distinct groups from sans-serif fonts
    - Monospace fonts cluster based on their fixed-width characteristics
-   - Distinctive fonts (like Comic Sans) appear as outliers
 
 3. **t-SNE vs. UMAP**:
    - t-SNE provides more stable and interpretable visualizations for font relationships
