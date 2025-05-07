@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """
+
 Extract image embeddings from Qwen2.5‑VL‑3B‑Instruct.
 
-Usage:
-    python extract_qwen_vl_embeddings.py --image path/to/image.jpg \
-        [--model Qwen/Qwen2.5-VL-3B-Instruct] [--device cuda]
 """
 
 from sklearn.manifold import TSNE
