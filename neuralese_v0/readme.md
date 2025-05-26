@@ -51,13 +51,15 @@ Each bias injection point has a learnable gate (sigmoid activation):
 
 - **Parameter efficiency**: <1% trainable parameters
 - **Stable training**: Adjustment ratios converge to reasonable values (~0.1-0.15)
-- **Layer specialization**: Gates learn different values per layer, indicating selective use of processed information
+- **Layer specialization**: Gates do not learn different values per layer will fix
+
+  ![image](https://github.com/user-attachments/assets/83e1b15c-de52-439e-a1c1-bc7aeb66394e)
 
 ## Implementation Details
 
-**Base Model**: Qwen3-0.6B (frozen)
-**Latent Dimension**: 128
-**Hook-based Architecture**: Clean separation of extraction and injection logic
-**Training Dataset**: GSM8K mathematical reasoning problems
+- **Base Model**: Qwen3-0.6B (frozen)
+- **Latent Dimension**: 128
+- **Hook-based Architecture**: Clean separation of extraction and injection logic
+- **Training Dataset**: GSM8K mathematical reasoning problems
 
 The architecture demonstrates that early transformer layers can effectively utilize compressed representations of deeper processing with minimal parameter overhead.
