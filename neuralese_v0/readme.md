@@ -40,7 +40,7 @@ This preserves the original residual stream while allowing controlled integratio
 - Use latents extracted from the previous token
 - Maintains autoregressive generation while providing "cross-temporal" information flow
 
-### Gating Mechanism
+### Gating Mechanism (this doesn't work will replace with attention)
 
 Each bias injection point has a learnable gate (sigmoid activation):
 - Starts at 0.5 (neutral scaling)
