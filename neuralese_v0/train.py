@@ -11,7 +11,7 @@ import json
 #from model import LatentAugmentedQwen
 
 # Hardcode wandb API key
-os.environ["WANDB_API_KEY"] = "96abf1612b3254db58323f533eda25e38a5a15aa"
+os.environ["WANDB_API_KEY"] = "your-api-key"
 
 # Training config
 TRAIN_CONFIG = {
