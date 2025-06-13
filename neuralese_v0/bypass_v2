@@ -1,0 +1,658 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from datasets import load_dataset
+import numpy as np
+from tqdm import tqdm
+import os
+import wandb
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+CONFIG = {
+    # Model and Data
+    'model_name': 'Qwen/Qwen3-0.6B',
+    'dataset_name': 'c4',
+    'dataset_config': 'en',
+    'max_length': 256,
+    'train_samples': 2000,
+    'val_samples': 50,
+    
+    # Architecture
+    'bypass_latent_dim': 256,
+    'num_layers': 28,  # Qwen3-0.6B has 28 layers
+    'hidden_dim': 1024,  # Qwen3-0.6B hidden size
+    
+    # Training
+    'batch_size': 4,
+    'stage1_lr': 5e-4,
+    'stage2_lr': 5e-4,
+    'stage1_epochs': 3,
+    'stage2_epochs': 2,
+    'log_interval': 50,
+    
+    # Paths
+    'checkpoint_path': 'stage1_checkpoint.pt',
+    
+    # NEW ▸ set to True to start from the saved Stage-1 weights
+    'load_from_checkpoint': False,
+    
+    # Device
+    'device': 'cuda' if torch.cuda.is_available() else 'cpu',
+    
+    # Wandb
+    'project_name': 'bypass-transformer',
+    'run_name': 'qwen3-fullstack-bypass'
+}
+
+# ============================================================================
+# WANDB SETUP
+# ============================================================================
+
+def setup_wandb():
+    """Initialize wandb logging"""
+    wandb.init(
+        project=CONFIG['project_name'],
+        name=CONFIG['run_name'],
+        config=CONFIG
+    )
+    return wandb
+
+# ============================================================================
+# DATA LOADING AND PREPROCESSING
+# ============================================================================
+
+class C4Dataset:
+    def __init__(self, tokenizer, split='train', max_samples=None):
+        self.tokenizer = tokenizer
+        self.max_samples = max_samples
+        self.dataset = load_dataset(
+            CONFIG['dataset_name'], 
+            CONFIG['dataset_config'], 
+            split=split,
+            streaming=True,
+            trust_remote_code=True
+        ).take(max_samples)
+        
+    def __iter__(self):
+        count = 0
+        for item in self.dataset:
+            if self.max_samples and count >= self.max_samples:
+                break
+                
+            text = item['text']
+            tokens = self.tokenizer(
+                text,
+                truncation=True,
+                padding='max_length',
+                max_length=CONFIG['max_length'],
+                return_tensors='pt'
+            )
+            
+            yield {
+                'input_ids': tokens['input_ids'].squeeze(0),
+                'attention_mask': tokens['attention_mask'].squeeze(0)
+            }
+            count += 1
+
+def create_dataloader(tokenizer, split='train', max_samples=None):
+    """Create DataLoader for streaming dataset"""
+    dataset = C4Dataset(tokenizer, split, max_samples)
+    
+    def collate_fn(batch):
+        input_ids = torch.stack([item['input_ids'] for item in batch])
+        attention_mask = torch.stack([item['attention_mask'] for item in batch])
+        return {
+            'input_ids': input_ids,
+            'attention_mask': attention_mask
+        }
+    
+    # Convert iterator to list for DataLoader
+    batch_data = []
+    for i, item in enumerate(dataset):
+        batch_data.append(item)
+        if len(batch_data) >= (max_samples or float('inf')):
+            break
+    
+    return DataLoader(
+        batch_data, 
+        batch_size=CONFIG['batch_size'], 
+        shuffle=True,
+        collate_fn=collate_fn
+    )
+
+# ============================================================================
+# BYPASS MODULES
+# ============================================================================
+
+class BypassEncoder(nn.Module):
+    """Encoder that compresses full-stack hidden states to bypass latent"""
+    
+    def __init__(self, num_layers, hidden_dim, latent_dim):
+        super().__init__()
+        input_dim = num_layers * hidden_dim
+        
+        # ⚠️  FP32 weights for numerical stability
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, num_layers * 100),      # fp32
+            nn.LayerNorm(num_layers * 100),              # fp32
+            nn.GELU(),
+            nn.Linear(num_layers * 100, 1024),           # fp32
+            nn.LayerNorm(1024),                          # fp32
+            nn.GELU(),
+            nn.Linear(1024, latent_dim)                  # fp32
+        )
+        
+        for m in self.encoder:
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight, gain=0.02)
+                nn.init.zeros_(m.bias)
+    
+    def forward(self, concatenated_states):
+        # Add input normalization
+        x = F.layer_norm(concatenated_states, concatenated_states.shape[-1:])
+        return self.encoder(x)
+
+class BypassProjector(nn.Module):
+    """Projector that converts bypass latent to layer-specific bias"""
+    
+    def __init__(self, latent_dim, hidden_dim):
+        super().__init__()
+        self.norm = nn.LayerNorm(latent_dim)            # fp32
+        self.projector = nn.Linear(latent_dim, hidden_dim)  # fp32
+        nn.init.xavier_uniform_(self.projector.weight, gain=0.02)
+        nn.init.zeros_(self.projector.bias)
+        
+    def forward(self, bypass_latent):
+        # Add input normalization
+        x = self.norm(bypass_latent)
+        return self.projector(x)
+
+# ============================================================================
+# MAIN BYPASS MODEL
+# ============================================================================
+
+class BypassQwenModel(nn.Module):
+    """Main wrapper that manages the base model and bypass modules"""
+    
+    def __init__(self, model_name):
+        super().__init__()
+        
+        # Load frozen base model
+        self.base_model = AutoModelForCausalLM.from_pretrained(
+            model_name, 
+            torch_dtype=torch.float16,
+            device_map=CONFIG['device'],
+            trust_remote_code=True
+        )
+        
+        # Freeze base model
+        for param in self.base_model.parameters():
+            param.requires_grad = False
+            
+        # Get actual model dimensions
+        sample_layer = self.base_model.model.layers[0]
+        self.hidden_dim = sample_layer.post_attention_layernorm.weight.shape[0]
+        self.num_layers = len(self.base_model.model.layers)
+        
+        wandb.log({
+            "model_info/num_layers": self.num_layers,
+            "model_info/hidden_dim": self.hidden_dim
+        })
+        
+        # Initialize bypass modules
+        self.bypass_encoder = BypassEncoder(
+            self.num_layers, 
+            self.hidden_dim, 
+            CONFIG['bypass_latent_dim']
+        ).to(CONFIG['device'])
+        
+        self.bypass_projectors = nn.ModuleList([
+            BypassProjector(CONFIG['bypass_latent_dim'], self.hidden_dim).to(CONFIG['device'])
+            for _ in range(self.num_layers)
+        ])
+        
+        # Hook management
+        self.extractor_hooks = []
+        self.injector_hooks = []
+        self.collected_states = []
+        self.cached_latents = None
+        self.use_injector_hooks = False
+        
+    def register_extractor_hooks(self):
+        """Register hooks to collect hidden states from all layers"""
+        self.collected_states = []
+        
+        def make_extractor_hook(layer_idx):
+            def hook(module, input, output):
+                # Store the post_attention_layernorm output
+                self.collected_states.append(output.clone())
+            return hook
+        
+        # Register hooks on post_attention_layernorm
+        for i, layer in enumerate(self.base_model.model.layers):
+            hook = layer.post_attention_layernorm.register_forward_hook(
+                make_extractor_hook(i)
+            )
+            self.extractor_hooks.append(hook)
+    
+    def register_injector_hooks(self):
+        """Inject biases (do addition in fp32, cast back to fp16)"""
+        def make_injector_hook(layer_idx):
+            def hook(module, input):
+                if self.use_injector_hooks and self.cached_latents is not None:
+                    # bias: fp32
+                    bias_fp32 = self.bypass_projectors[layer_idx](self.cached_latents)
+                    # hidden → fp32   (input is a tuple)
+                    hidden_fp32 = input[0].to(torch.float32)
+                    hidden_fp32 = hidden_fp32 + bias_fp32
+                    hidden_fp16 = hidden_fp32.to(input[0].dtype)  # cast back
+                    return (hidden_fp16,)
+                return input
+            return hook
+        
+        # Register hooks on MLP input (before activation)
+        for i, layer in enumerate(self.base_model.model.layers):
+            # Hook on the input to the MLP's gate projection
+            hook = layer.mlp.gate_proj.register_forward_pre_hook(
+                make_injector_hook(i)
+            )
+            self.injector_hooks.append(hook)
+    
+    def remove_hooks(self):
+        """Remove all registered hooks"""
+        for hook in self.extractor_hooks + self.injector_hooks:
+            hook.remove()
+        self.extractor_hooks = []
+        self.injector_hooks = []
+    
+    def forward_stage1(self, input_ids, attention_mask):
+        """Stage 1: Reconstruction training (no hooks needed)"""
+        # Get all hidden states without hooks
+        self.collected_states = []
+        self.register_extractor_hooks()
+        
+        with torch.no_grad():
+            _ = self.base_model(input_ids=input_ids, attention_mask=attention_mask)
+        
+        self.remove_hooks()
+        
+        # Concatenate collected states
+        # collected_states: list of (batch, seq_len, hidden_dim)
+        concatenated = torch.stack(self.collected_states, dim=2)  # (batch, seq_len, num_layers, hidden_dim)
+        concatenated = concatenated.view(
+            concatenated.shape[0], 
+            concatenated.shape[1], 
+            -1
+        )  # (batch, seq_len, num_layers * hidden_dim)
+        
+        # work in FP32 from here on
+        concatenated = concatenated.to(torch.float32)
+        
+        # Add standardization of concatenated states
+        concatenated_mean = concatenated.mean(dim=-1, keepdim=True)
+        concatenated_std = concatenated.std(dim=-1, keepdim=True) + 1e-6
+        concatenated = (concatenated - concatenated_mean) / concatenated_std
+
+        # Get bypass latent
+        bypass_latent = self.bypass_encoder(concatenated)
+        
+        # Standardize bypass latent
+        bypass_mean = bypass_latent.mean(dim=-1, keepdim=True)
+        bypass_std = bypass_latent.std(dim=-1, keepdim=True) + 1e-6
+        bypass_latent = (bypass_latent - bypass_mean) / bypass_std
+        
+        # Standardize collected states
+        self.collected_states = [
+            (state - state.mean(dim=-1, keepdim=True)) / (state.std(dim=-1, keepdim=True) + 1e-6)
+            for state in self.collected_states
+        ]
+        
+        # convert reference states to fp32 for a stable loss
+        self.collected_states = [s.to(torch.float32) for s in self.collected_states]
+        
+        # Compute reconstruction losses for each layer
+        layer_losses = []
+        mse_losses = []
+        l1_losses = []
+        cos_losses = []
+        for i, original_state in enumerate(self.collected_states):
+            predicted_bias = self.bypass_projectors[i](bypass_latent)      # fp32
+            
+            mse_loss = F.mse_loss(predicted_bias, original_state)
+            l1_loss  = F.l1_loss(predicted_bias, original_state)
+            cos_sim  = F.cosine_similarity(
+                predicted_bias.view(-1, self.hidden_dim),
+                original_state.view(-1, self.hidden_dim),
+                dim=1).mean()
+            cos_loss = 1 - cos_sim
+            
+            #print(f"Layer {i} losses - MSE: {mse_loss.item():.2f}, L1: {l1_loss.item():.2f}, Cosine: {cos_loss.item():.2f}")
+            
+            layer_losses.append(mse_loss + l1_loss + cos_loss)
+            mse_losses.append(mse_loss)
+            l1_losses.append(l1_loss)
+            cos_losses.append(cos_loss)
+        
+        total_loss = sum(layer_losses) / len(layer_losses)
+        total_mse_loss = sum(mse_losses) / len(mse_losses)
+        total_l1_loss = sum(l1_losses) / len(l1_losses)
+        total_cos_loss = sum(cos_losses) / len(cos_losses)
+        
+        # Log individual components
+        wandb.log({
+            "loss_components/mse": total_mse_loss,
+            "loss_components/l1": total_l1_loss,
+            "loss_components/cosine": total_cos_loss,
+            "loss_components/total": total_loss
+        })
+        
+        return total_loss, total_mse_loss, total_l1_loss, total_cos_loss
+    
+    def forward_stage2(self, input_ids, attention_mask):
+        """Stage 2: Task fine-tuning (two-pass with hooks)"""
+        # ---------- PASS 1 : extract states ----------
+        self.collected_states = []
+        self.use_injector_hooks = False
+        self.register_extractor_hooks()
+
+        with torch.no_grad():
+            _ = self.base_model(input_ids=input_ids, attention_mask=attention_mask)
+
+        self.remove_hooks()
+
+        # Concatenate → (batch, seq_len, num_layers*hidden_dim)
+        concatenated = torch.stack(self.collected_states, dim=2)
+        concatenated = concatenated.view(concatenated.shape[0],
+                                         concatenated.shape[1], -1)
+
+        # >>> USE FP32, SAME NORMALISATION AS STAGE-1  <<<
+        concatenated = concatenated.to(torch.float32)
+        concat_mean = concatenated.mean(dim=-1, keepdim=True)
+        concat_std  = concatenated.std(dim=-1, keepdim=True) + 1e-6
+        concatenated = (concatenated - concat_mean) / concat_std
+
+        # Encode (frozen)
+        with torch.no_grad():
+            self.cached_latents = self.bypass_encoder(concatenated)
+
+        # Apply the same latent normalisation learned in Stage-1
+        lat_mean = self.cached_latents.mean(dim=-1, keepdim=True)
+        lat_std  = self.cached_latents.std(dim=-1, keepdim=True) + 1e-6
+        self.cached_latents = (self.cached_latents - lat_mean) / lat_std
+
+        # Pass 2: Inject biases and compute task loss
+        self.use_injector_hooks = True
+        self.register_injector_hooks()
+        
+        outputs = self.base_model(input_ids=input_ids, attention_mask=attention_mask)
+        
+        self.remove_hooks()
+        
+        # Compute language modeling loss
+        shift_logits = outputs.logits[..., :-1, :].contiguous()
+        shift_labels = input_ids[..., 1:].contiguous()
+        
+        # Mask out padding tokens
+        shift_attention = attention_mask[..., 1:].contiguous()
+        
+        loss_fct = nn.CrossEntropyLoss(reduction='none')
+        flat_logits = shift_logits.view(-1, shift_logits.size(-1))
+        flat_labels = shift_labels.view(-1)
+        flat_attention = shift_attention.view(-1)
+        
+        losses = loss_fct(flat_logits, flat_labels)
+        masked_losses = losses * flat_attention.float()
+        
+        # Average over valid tokens
+        total_loss = masked_losses.sum() / flat_attention.sum()
+        
+        return total_loss
+
+# ============================================================================
+# TRAINING FUNCTIONS
+# ============================================================================
+
+def train_stage1(model, train_loader, val_loader, epochs):
+    """Stage 1: Reconstruction pre-training"""
+    print("Starting Stage 1: Reconstruction Pre-training")
+    wandb.log({"stage": "reconstruction_pretraining"})
+    
+    # Setup optimizer for encoder + all projectors
+    trainable_params = list(model.bypass_encoder.parameters())
+    for projector in model.bypass_projectors:
+        trainable_params.extend(list(projector.parameters()))
+    
+    optimizer = torch.optim.AdamW(trainable_params, lr=CONFIG['stage1_lr'])
+    # Add gradient clipping
+    torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=1.0)
+    
+    model.train()
+    step = 0
+    
+    for epoch in range(epochs):
+        print(f"Stage 1 Epoch {epoch + 1}/{epochs}")
+        
+        epoch_losses = []
+        pbar = tqdm(train_loader, desc=f"Stage 1 Epoch {epoch + 1}")
+        
+        for batch in pbar:
+            input_ids = batch['input_ids'].to(CONFIG['device'])
+            attention_mask = batch['attention_mask'].to(CONFIG['device'])
+            
+            optimizer.zero_grad()
+            
+            total_loss, total_mse_loss, total_l1_loss, total_cos_loss = model.forward_stage1(input_ids, attention_mask)
+            total_loss.backward()
+            optimizer.step()
+            
+            epoch_losses.append(total_loss.item())
+            step += 1
+            
+            # Log to wandb
+            wandb.log({
+                "stage1/step": step,
+                "stage1/loss": total_loss.item(),
+                "stage1/epoch": epoch + 1
+            })
+            
+            if step % CONFIG['log_interval'] == 0:
+                avg_loss = np.mean(epoch_losses[-CONFIG['log_interval']:])
+                
+                wandb.log({
+                    "stage1/avg_loss_last_50": avg_loss,
+                    "stage1/mse_loss_last_50": total_mse_loss,
+                    "stage1/l1_loss_last_50": total_l1_loss,
+                    "stage1/cosine_loss_last_50": total_cos_loss
+                })
+            
+            pbar.set_postfix({'loss': total_loss.item(), 'mse': total_mse_loss.item(), 'l1': total_l1_loss.item(), 'cosine': total_cos_loss.item()})
+        
+        # Validation
+        model.eval()
+        val_losses = []
+        with torch.no_grad():
+            for batch in val_loader:
+                input_ids = batch['input_ids'].to(CONFIG['device'])
+                attention_mask = batch['attention_mask'].to(CONFIG['device'])
+                val_loss, total_mse_loss, total_l1_loss, total_cos_loss = model.forward_stage1(input_ids, attention_mask)
+                val_losses.append(val_loss.item())
+        
+        avg_train_loss = np.mean(epoch_losses)
+        avg_val_loss = np.mean(val_losses)
+        
+        print(f"Epoch {epoch + 1} - Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}")
+        
+        wandb.log({
+            f"stage1/epoch_{epoch+1}_train_loss": avg_train_loss,
+            f"stage1/epoch_{epoch+1}_val_loss": avg_val_loss
+        })
+        
+        model.train()
+    
+    # Save checkpoint
+    checkpoint = {
+        'bypass_encoder': model.bypass_encoder.state_dict(),
+        'bypass_projectors': [proj.state_dict() for proj in model.bypass_projectors],
+        'config': CONFIG
+    }
+    torch.save(checkpoint, CONFIG['checkpoint_path'])
+    print(f"Stage 1 checkpoint saved to {CONFIG['checkpoint_path']}")
+    wandb.log({"stage1/checkpoint_saved": True})
+
+def train_stage2(model, train_loader, val_loader, epochs):
+    """Stage 2: Task fine-tuning"""
+    print("Starting Stage 2: Task Fine-tuning")
+    wandb.log({"stage": "task_finetuning"})
+    
+    # Load checkpoint
+    checkpoint = torch.load(CONFIG['checkpoint_path'])
+    model.bypass_encoder.load_state_dict(checkpoint['bypass_encoder'])
+    for i, proj_state in enumerate(checkpoint['bypass_projectors']):
+        model.bypass_projectors[i].load_state_dict(proj_state)
+    
+    # Freeze encoder, only train projectors
+    for param in model.bypass_encoder.parameters():
+        param.requires_grad = False
+    
+    trainable_params = []
+    for projector in model.bypass_projectors:
+        for param in projector.parameters():
+            param.requires_grad = True
+        trainable_params.extend(list(projector.parameters()))
+    
+    optimizer = torch.optim.AdamW(trainable_params, lr=CONFIG['stage2_lr'])
+    
+    model.train()
+    step = 0
+    
+    for epoch in range(epochs):
+        print(f"Stage 2 Epoch {epoch + 1}/{epochs}")
+        
+        epoch_losses = []
+        pbar = tqdm(train_loader, desc=f"Stage 2 Epoch {epoch + 1}")
+        
+        for batch in pbar:
+            input_ids = batch['input_ids'].to(CONFIG['device'])
+            attention_mask = batch['attention_mask'].to(CONFIG['device'])
+            
+            optimizer.zero_grad()
+            
+            loss = model.forward_stage2(input_ids, attention_mask)
+            loss.backward()
+
+            # NEW ▸ clip projector gradients to avoid fp16 overflow
+            torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=1.0)
+
+            optimizer.step()
+            
+            epoch_losses.append(loss.item())
+            step += 1
+            
+            # Log to wandb
+            wandb.log({
+                "stage2/step": step,
+                "stage2/task_loss": loss.item(),
+                "stage2/epoch": epoch + 1
+            })
+            
+            if step % CONFIG['log_interval'] == 0:
+                avg_loss = np.mean(epoch_losses[-CONFIG['log_interval']:])
+                print(f"Step {step}, Avg Task Loss: {avg_loss:.4f}")
+                wandb.log({"stage2/avg_loss_last_50": avg_loss})
+            
+            pbar.set_postfix({'loss': loss.item()})
+        
+        # Validation
+        model.eval()
+        val_losses = []
+        with torch.no_grad():
+            for batch in val_loader:
+                input_ids = batch['input_ids'].to(CONFIG['device'])
+                attention_mask = batch['attention_mask'].to(CONFIG['device'])
+                val_loss = model.forward_stage2(input_ids, attention_mask)
+                val_losses.append(val_loss.item())
+        
+        avg_train_loss = np.mean(epoch_losses)
+        avg_val_loss = np.mean(val_losses)
+        
+        print(f"Epoch {epoch + 1} - Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}")
+        
+        wandb.log({
+            f"stage2/epoch_{epoch+1}_train_loss": avg_train_loss,
+            f"stage2/epoch_{epoch+1}_val_loss": avg_val_loss
+        })
+        
+        model.train()
+
+# ============================================================================
+# MAIN EXECUTION
+# ============================================================================
+
+def main():
+    """Main training pipeline"""
+    setup_wandb()
+    
+    print("Starting Full-Stack Bypass Transformer Training")
+    print(f"Device: {CONFIG['device']}")
+    print(f"Configuration: {CONFIG}")
+    
+    # Initialize tokenizer and model
+    print("Loading tokenizer and model...")
+    tokenizer = AutoTokenizer.from_pretrained(CONFIG['model_name'])
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    
+    model = BypassQwenModel(CONFIG['model_name'])
+    
+    # Create data loaders
+    print("Creating data loaders...")
+    train_loader = create_dataloader(
+        tokenizer, 
+        split='train', 
+        max_samples=CONFIG['train_samples']
+    )
+    val_loader = create_dataloader(
+        tokenizer, 
+        split='validation', 
+        max_samples=CONFIG['val_samples']
+    )
+    
+    # ------------------------------------------------------------------
+    # Optionally load Stage-1 checkpoint
+    # ------------------------------------------------------------------
+    stage1_already_done = False
+    if CONFIG['load_from_checkpoint']:
+        ckpt_path = CONFIG['checkpoint_path']
+        if os.path.isfile(ckpt_path):
+            ckpt = torch.load(ckpt_path, map_location=CONFIG['device'])
+            model.bypass_encoder.load_state_dict(ckpt['bypass_encoder'])
+            for i, proj_state in enumerate(ckpt['bypass_projectors']):
+                model.bypass_projectors[i].load_state_dict(proj_state)
+            print(f"Loaded Stage-1 weights from {ckpt_path}")
+            stage1_already_done = True
+            wandb.log({"stage1/loaded_from_checkpoint": True})
+        else:
+            print(f"Checkpoint '{ckpt_path}' not found — running Stage-1 from scratch")
+
+    # ------------------------------------------------------------------
+    # Stage-1 : Reconstruction pre-training (only if not already done)
+    # ------------------------------------------------------------------
+    if not stage1_already_done:
+        train_stage1(model, train_loader, val_loader, CONFIG['stage1_epochs'])
+
+    # ------------------------------------------------------------------
+    # Stage-2 : Task fine-tuning
+    # ------------------------------------------------------------------
+    train_stage2(model, train_loader, val_loader, CONFIG['stage2_epochs'])
+    
+    print("Training completed successfully!")
+    wandb.log({"training_completed": True})
+    wandb.finish()
+
+if __name__ == "__main__":
+    main() 
