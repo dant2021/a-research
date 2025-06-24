@@ -1,0 +1,51 @@
+{
+  "name": "error-context-collector",
+  "displayName": "Error Context Collector",
+  "description": "Automatically extracts function definitions from runtime errors for AI debugging",
+  "version": "0.1.0",
+  "publisher": "local-dev",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "errorContextCollector.processFile",
+        "title": "Process Current File for Errors",
+        "category": "Error Context Collector"
+      },
+      {
+        "command": "errorContextCollector.addSymbol",
+        "title": "Add Symbol at Cursor",
+        "category": "Error Context Collector"
+      },
+      {
+        "command": "errorContextCollector.createBuffers",
+        "title": "Create Error Buffers",
+        "category": "Error Context Collector"
+      },
+      {
+        "command": "errorContextCollector.status",
+        "title": "Status",
+        "category": "Error Context Collector"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "20.x",
+    "@types/vscode": "^1.96.0",
+    "typescript": "^5.0.0"
+  }
+}

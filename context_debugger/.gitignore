@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Compiled output
+out/
+*.js
+*.js.map
+
+# Extension packages
+*.vsix
+
+# Generated files
+error_definitions.txt
+vscode_error_buffer.py
+vscode_error_buffer.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock 
