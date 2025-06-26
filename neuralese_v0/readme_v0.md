@@ -14,7 +14,7 @@ This project implements a **two-pass transformer enhancement** that allows early
 - Mapping: L5→L0, L6→L1, L7→L2, ..., L25→L20
 
 **Latent Compression**: 
-- **Down projection**: 1024 dimensions → 128 dimensions (19.2x compression)
+- **Down projection**: 1024 dimensions → 128 dimensions (9.2x compression)
 - **Up projection**: 128 dimensions → 1024 dimensions (reconstruction)
 - Only these projection layers are trainable (~5.5M parameters, 0.92% of total)
 
